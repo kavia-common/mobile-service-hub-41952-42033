@@ -1,23 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-# Ensure workspace and .init exist and that current user can create/chmod/execute helper scripts
 WORKSPACE="/home/kavia/workspace/code-generation/mobile-service-hub-41952-42033/MobileServiceHubMonolith"
-mkdir -p "$WORKSPACE" "$WORKSPACE/.init"
-
-TEST_FILE="$WORKSPACE/.init/.perm_test_$$"
-# Create a test file (non-failing)
-: > "$TEST_FILE" 2>/dev/null || true
-
-# Try to make it executable; if that fails, repair ownership/permissions and retry
-if ! chmod +x "$TEST_FILE" 2>/dev/null; then
-  # Attempt minimal fixes using sudo only when needed
-  sudo chown -R "$(id -u):$(id -g)" "$WORKSPACE" || true
-  sudo chmod -R u+rwX "$WORKSPACE" || true
-  : > "$TEST_FILE" || true
-  chmod +x "$TEST_FILE" || true
+cd "$WORKSPACE"
+mkdir -p "$WORKSPACE/logs"
+INSTALL_LOG="$WORKSPACE/logs/install.log"
+if [ -f yarn.lock ] && command -v yarn >/dev/null 2>&1; then
+  yarn --silent --non-interactive > "$INSTALL_LOG" 2>&1 || (tail -n 200 "$INSTALL_LOG" >&2; echo 'yarn install failed; see install.log' >&2; exit 30)
+else
+  if [ -f package-lock.json ]; then
+    npm ci --prefer-offline --no-audit --progress=false > "$INSTALL_LOG" 2>&1 || (tail -n 200 "$INSTALL_LOG" >&2; echo 'npm ci failed; see install.log' >&2; exit 31)
+  else
+    npm i --no-audit --progress=false > "$INSTALL_LOG" 2>&1 || (tail -n 200 "$INSTALL_LOG" >&2; echo 'npm install failed; see install.log' >&2; exit 32)
+  fi
 fi
-
-# Clean up test file and exit
-rm -f "$TEST_FILE" || true
-exit 0
+# Verify core packages can be resolved
+node -e "try{ require.resolve('react'); require.resolve('react-dom'); try{ require.resolve('react-scripts'); }catch(e){} process.exit(0);}catch(e){ console.error('module resolution failed:',e.message); process.exit(33)}" || (tail -n 200 "$INSTALL_LOG" >&2; echo 'core packages missing or not resolvable; see install.log' >&2; exit 34)
+# npm ls to detect broken installs (non-fatal parse but fail on missing)
+npm ls react react-dom react-scripts --depth=0 > "$INSTALL_LOG" 2>&1 || (tail -n 200 "$INSTALL_LOG" >&2; echo 'npm ls indicates issues; see install.log' >&2; exit 35)
